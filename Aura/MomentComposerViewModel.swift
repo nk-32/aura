@@ -34,22 +34,30 @@ final class MomentComposerViewModel: ObservableObject {
 
     func loadPhoto(from item: PhotosPickerItem) async {
         do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
                 errorMessage = "写真の読み込みに失敗しました。"
                 return
             }
 
-            composeMoment(from: image)
+            let image = await Task.detached(priority: .userInitiated) {
+                MomentImagePipeline.prepareDisplayImage(from: data)
+            }.value
+
+            guard let image else {
+                errorMessage = "写真の読み込みに失敗しました。"
+                return
+            }
+
+            composeMoment(from: image, isPreparedForDisplay: true)
         } catch {
             errorMessage = "写真の読み込みに失敗しました。"
         }
     }
 
-    func composeMoment(from image: UIImage) {
+    func composeMoment(from image: UIImage, isPreparedForDisplay: Bool = false) {
         generationTask?.cancel()
 
-        sourceImage = image
+        sourceImage = nil
         generatedMoment = nil
         errorMessage = nil
         isGenerating = true
@@ -58,8 +66,22 @@ final class MomentComposerViewModel: ObservableObject {
             guard let self else { return }
 
             do {
-                let resized = image.preparingThumbnail(of: CGSize(width: 1400, height: 1400)) ?? image
-                let analysis = try await self.analysisService.analyze(image: resized, soundLevel: self.ambientLevel)
+                let preparedImage = if isPreparedForDisplay {
+                    image
+                } else {
+                    await Task.detached(priority: .userInitiated) {
+                        MomentImagePipeline.prepareDisplayImage(from: image) ?? image
+                    }.value
+                }
+
+                if Task.isCancelled { return }
+
+                self.sourceImage = preparedImage
+
+                let analysis = try await self.analysisService.analyze(
+                    image: preparedImage,
+                    soundLevel: self.ambientLevel
+                )
                 let poem = await self.poet.composePoem(from: analysis)
 
                 if Task.isCancelled { return }
