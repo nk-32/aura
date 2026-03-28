@@ -57,6 +57,12 @@ final class MomentComposerViewModel: ObservableObject {
     func composeMoment(from image: UIImage, isPreparedForDisplay: Bool = false) {
         generationTask?.cancel()
 
+        let imageData: Data? = if isPreparedForDisplay {
+            nil
+        } else {
+            image.jpegData(compressionQuality: 0.9)
+        }
+
         sourceImage = nil
         generatedMoment = nil
         errorMessage = nil
@@ -66,12 +72,16 @@ final class MomentComposerViewModel: ObservableObject {
             guard let self else { return }
 
             do {
-                let preparedImage = if isPreparedForDisplay {
-                    image
-                } else {
-                    await Task.detached(priority: .userInitiated) {
-                        MomentImagePipeline.prepareDisplayImage(from: image) ?? image
+                let preparedImage: UIImage
+                if isPreparedForDisplay {
+                    preparedImage = image
+                } else if let imageData {
+                    preparedImage = await Task.detached(priority: .userInitiated) {
+                        MomentImagePipeline.prepareDisplayImage(from: imageData)
                     }.value
+                    ?? image
+                } else {
+                    preparedImage = image
                 }
 
                 if Task.isCancelled { return }
